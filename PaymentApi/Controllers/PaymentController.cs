@@ -1,89 +1,63 @@
 using Microsoft.AspNetCore.Mvc;
+using Microsoft.Extensions.Logging;
+using Payment.Api.Models;
+using Payment.Api.Services;
 using Payment.Application.Services;
-using Payment.Domain.Entities;
 
 namespace Payment.Api.Controllers
 {
-
     [ApiController]
-    [Route("api/v1/payments")]
+    [ApiVersion("1.0")]
+    [Route("api/v{version:apiVersion}/payments")]
     public class PaymentController : ControllerBase
     {
-
-        private readonly PaymentService _paymentService;
+        private readonly IPaymentService _paymentService;
         private readonly ILogger<PaymentController> _logger;
 
         public PaymentController(
-            PaymentService paymentService,
+            IPaymentService paymentService,
             ILogger<PaymentController> logger)
         {
             _paymentService = paymentService;
             _logger = logger;
         }
 
-
-        // ===============================
-        // CREATE PAYMENT
-        // ===============================
-
+        /// <summary>
+        /// Criar pagamento
+        /// </summary>
         [HttpPost]
         public async Task<IActionResult> CreatePayment(
-            [FromBody] CreatePaymentRequest request,
-            [FromHeader(Name = "Idempotency-Key")]
-            string idempotencyKey)
+            [FromBody] PaymentRequest request,
+            [FromHeader(Name = "Idempotency-Key")] string idempotencyKey)
         {
-
             if (string.IsNullOrEmpty(idempotencyKey))
-            {
-                return BadRequest(
-                    "Header Idempotency-Key obrigatório");
-            }
+                return BadRequest("Idempotency-Key header required");
 
+            if (!ModelState.IsValid)
+                return BadRequest(ModelState);
 
-            try
-            {
+            _logger.LogInformation(
+                "Creating payment OrderId={OrderId} Amount={Amount}",
+                request.OrderId,
+                request.Amount);
 
-                var payment =
-                    await _paymentService.CreatePayment(
-                        request.OrderId,
-                        request.Amount,
-                        idempotencyKey);
+            var result = await _paymentService.CreatePaymentAsync(
+                request,
+                idempotencyKey);
 
-
-                _logger.LogInformation(
-                    "Payment created {PaymentId}",
-                    payment.Id);
-
-
-                return Created(
-                    $"api/v1/payments/{payment.Id}",
-                    payment);
-            }
-
-            catch (Exception ex)
-            {
-
-                _logger.LogError(ex,
-                    "Error creating payment");
-
-
-                return BadRequest(ex.Message);
-            }
-
+            return CreatedAtAction(
+                nameof(GetPayment),
+                new { id = result.Id },
+                result);
         }
 
-
-
-        // ===============================
-        // GET PAYMENT
-        // ===============================
-
+        /// <summary>
+        /// Consultar pagamento
+        /// </summary>
         [HttpGet("{id}")]
         public async Task<IActionResult> GetPayment(Guid id)
         {
-
-            var payment =
-                await _paymentService.GetPayment(id);
+            var payment = await _paymentService.GetPaymentAsync(id);
 
             if (payment == null)
                 return NotFound();
@@ -91,44 +65,46 @@ namespace Payment.Api.Controllers
             return Ok(payment);
         }
 
-
-
-        // ===============================
-        // GET ALL PAYMENTS
-        // ===============================
-
-        [HttpGet]
-        public async Task<IActionResult> GetAll()
+        /// <summary>
+        /// Cancelar pagamento
+        /// </summary>
+        [HttpPost("{id}/cancel")]
+        public async Task<IActionResult> CancelPayment(Guid id)
         {
+            var success = await _paymentService.CancelPaymentAsync(id);
 
-            var payments =
-                await _paymentService.GetAllPayments();
-
-            return Ok(payments);
-        }
-
-
-
-        // ===============================
-        // PAYMENT STATUS
-        // ===============================
-
-        [HttpGet("{id}/status")]
-        public async Task<IActionResult> Status(Guid id)
-        {
-
-            var payment =
-                await _paymentService.GetPayment(id);
-
-            if (payment == null)
+            if (!success)
                 return NotFound();
 
             return Ok(new
             {
-                payment.Id,
-                payment.Status
+                message = "Payment cancelled"
             });
         }
 
+        /// <summary>
+        /// Listar pagamentos
+        /// </summary>
+        [HttpGet]
+        public async Task<IActionResult> GetPayments()
+        {
+            var payments = await _paymentService.GetPaymentsAsync();
+
+            return Ok(payments);
+        }
+
+        /// <summary>
+        /// Health endpoint financeiro
+        /// </summary>
+        [HttpGet("health")]
+        public IActionResult Health()
+        {
+            return Ok(new
+            {
+                status = "UP",
+                service = "Payment API",
+                timestamp = DateTime.UtcNow
+            });
+        }
     }
 }

@@ -1,6 +1,6 @@
 namespace Payment.Api.Models
 {
-    public class CreatePaymentRequest
+    public class IPaymentService
     {
         public string OrderId { get; set; }
 
