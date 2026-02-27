@@ -1,147 +1,43 @@
 using Microsoft.EntityFrameworkCore;
-using Payment.Application.Services;
-using Payment.Infrastructure.Data;
-using Serilog;
-using Polly;
-using OpenTelemetry.Trace;
-using Prometheus;
-
+using Payment.Api.Data;
+using Payment.Api.Services;
+using Payment.Api.BackgroundServices;
+using StackExchange.Redis;
 
 var builder = WebApplication.CreateBuilder(args);
 
-
-// =========================
-// LOGS (Serilog)
-// =========================
-
-Log.Logger = new LoggerConfiguration()
-    .WriteTo.Console()
-    .CreateLogger();
-
-builder.Host.UseSerilog();
-
-
-// =========================
-// Controllers
-// =========================
-
 builder.Services.AddControllers();
 
+builder.Services.AddDbContext<PaymentDbContext>(o =>
+    o.UseNpgsql(
+        builder.Configuration
+        .GetConnectionString("Postgres")));
 
-// =========================
-// Swagger
-// =========================
+builder.Services.AddSingleton<IConnectionMultiplexer>(
+    ConnectionMultiplexer.Connect("redis:6379"));
+
+builder.Services.AddScoped<IPaymentService, PaymentService>();
+
+builder.Services.AddHttpClient("gateway", c =>
+{
+    c.BaseAddress =
+        new Uri("http://payment-gateway:8080");
+});
+
+builder.Services.AddHostedService<OutboxProcessor>();
 
 builder.Services.AddEndpointsApiExplorer();
 
 builder.Services.AddSwaggerGen();
 
-
-// =========================
-// SQL SERVER
-// =========================
-
-builder.Services.AddDbContext<PaymentDbContext>(options =>
-    options.UseSqlServer(
-        builder.Configuration
-        .GetConnectionString("sql")));
-
-
-// =========================
-// REDIS ***********|CREATE BY SCHULTZ IT|*************
-// =========================
-
-builder.Services.AddStackExchangeRedisCache(options =>
-{
-    options.Configuration = "redis:6379";
-});
-
-
-// =========================
-// SERVICES ***********|CREATE BY SCHULTZ IT|*************
-// =========================
-
-builder.Services.AddScoped<PaymentService>();
-
-
-// =========================
-// MEDIATR (CQRS) ***********|CREATE BY SCHULTZ IT|*************
-// =========================
-
-builder.Services.AddMediatR(cfg =>
-    cfg.RegisterServicesFromAssembly(
-        typeof(PaymentService).Assembly));
-
-
-// ========================= 
-// HTTP CLIENT GATEWAY ***********|CREATE BY SCHULTZ IT|*************
-// =========================
-
-builder.Services.AddHttpClient("gateway", client =>
-{
-    client.BaseAddress =
-        new Uri("http://gatewaySimulator");
-})
-.AddTransientHttpErrorPolicy(p =>
-p.WaitAndRetryAsync(
-5,
-retry =>
-TimeSpan.FromSeconds(
-Math.Pow(2, retry))))
-.AddPolicyHandler(
-
-Policy.Handle<HttpRequestException>()
-
-.CircuitBreakerAsync(
-5,
-TimeSpan.FromSeconds(30)));
-
-
-
-// =========================
-// HEALTH CHECKS ***********|CREATE BY SCHULTZ IT|*************
-// =========================
-
-builder.Services.AddHealthChecks()
-.AddSqlServer(
-builder.Configuration.GetConnectionString("sql"))
-.AddRedis("redis:6379");
-
-
-// =========================
-// OPENTELEMETRY ***********|CREATE BY SCHULTZ IT|*************
-// =========================
-
-builder.Services.AddOpenTelemetry()
-
-.WithTracing(b => b
-
-.AddAspNetCoreInstrumentation()
-
-.AddHttpClientInstrumentation()
-
-.AddConsoleExporter());
-
-
-
 var app = builder.Build();
 
 app.UseSwagger();
-app.UseSwagger();
-app.UseRouting();
-app.UseAuthorization();
 
-// =========================
-// PROMETHEUS METRICS
-// =========================
-
-app.UseHttpMetrics();
-
-// =========================
-// ENDPOINTS
-// =========================
+app.UseSwaggerUI();
 
 app.MapControllers();
-app.MapHealthChecks("/health");
-app.MapMetrics();
+
+DbInitializer.Initialize(app.Services);
+
 app.Run();
