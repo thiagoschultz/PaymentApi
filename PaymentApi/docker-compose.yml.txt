@@ -2,31 +2,174 @@ version: '3.9'
 
 services:
 
-  api:
+  payment-api:
+    container_name: payment-api
     build:
-      context: ./Payment.Api
+      context: .
+      dockerfile: Payment.Api/Dockerfile
     ports:
-      - "5000:80"
-    depends_on:
-      - sqlserver
-      - rabbitmq
+      - "5000:8080"
+    environment:
+      ASPNETCORE_ENVIRONMENT: Docker
 
-  worker:
-    build:
-      context: ./Payment.Worker
+      ConnectionStrings__Postgres:
+        Host=postgres;
+        Database=paymentdb;
+        Username=postgres;
+        Password=postgres
+
+      Redis__ConnectionString: redis:6379
+
+      Rabbit__Host: rabbitmq
+      Rabbit__User: guest
+      Rabbit__Password: guest
+
+      OTEL_EXPORTER_OTLP_ENDPOINT: http://jaeger:4317
+
     depends_on:
+      - postgres
       - rabbitmq
+      - redis
+      - seq
+
+    networks:
+      - fintech-network
+
+    restart: always
+
+
+  payment-gateway:
+    container_name: payment-gateway
+    build:
+      context: .
+      dockerfile: PaymentGatewayMock/Dockerfile
+    ports:
+      - "5001:8080"
+    networks:
+      - fintech-network
+
+    restart: always
+
+
+  postgres:
+    image: postgres:15
+    container_name: postgres
+    environment:
+      POSTGRES_DB: paymentdb
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+    ports:
+      - "5432:5432"
+
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+
+    networks:
+      - fintech-network
+
+    restart: always
+
 
   rabbitmq:
     image: rabbitmq:3-management
+    container_name: rabbitmq
     ports:
       - "5672:5672"
       - "15672:15672"
 
-  sqlserver:
-    image: mcr.microsoft.com/mssql/server:2022-latest
-    environment:
-      SA_PASSWORD: "Senha@123"
-      ACCEPT_EULA: "Y"
+    networks:
+      - fintech-network
+
+    restart: always
+
+
+  redis:
+    image: redis:7
+    container_name: redis
     ports:
-      - "1433:1433"
+      - "6379:6379"
+
+    networks:
+      - fintech-network
+
+    restart: always
+
+
+  jaeger:
+    image: jaegertracing/all-in-one:latest
+    container_name: jaeger
+
+    ports:
+      - "16686:16686"
+      - "4317:4317"
+
+    networks:
+      - fintech-network
+
+    restart: always
+
+
+  prometheus:
+    image: prom/prometheus
+    container_name: prometheus
+
+    volumes:
+      - ./monitoring/prometheus.yml:/etc/prometheus/prometheus.yml
+
+    ports:
+      - "9090:9090"
+
+    networks:
+      - fintech-network
+
+    restart: always
+
+
+  grafana:
+    image: grafana/grafana
+    container_name: grafana
+
+    ports:
+      - "3000:3000"
+
+    volumes:
+      - grafana-data:/var/lib/grafana
+
+    networks:
+      - fintech-network
+
+    restart: always
+
+
+  seq:
+    image: datalust/seq:latest
+    container_name: seq
+
+    environment:
+      ACCEPT_EULA: "Y"
+
+    ports:
+      - "5341:80"
+
+    volumes:
+      - seq-data:/data
+
+    networks:
+      - fintech-network
+
+    restart: always
+
+
+
+networks:
+
+  fintech-network:
+    driver: bridge
+
+
+
+volumes:
+
+  postgres-data:
+  grafana-data:
+  seq-data
