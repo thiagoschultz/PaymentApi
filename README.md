@@ -1,4 +1,4 @@
-# 💳 Payment Core
+# 💳 Payment API
 
 Production-grade Payment Processing Microservice built with ASP.NET Core.
 
